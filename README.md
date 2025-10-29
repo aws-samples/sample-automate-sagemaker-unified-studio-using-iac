@@ -228,4 +228,4 @@ This project was developed and maintained by:
 
 - **Manish Garg**
 - **Kanchan Kumar**
-- **SHUBHAM KUMAR**
+- **Shubham Kumar**
