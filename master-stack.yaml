@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Master template for other 3 stacks'
+
+Parameters:
+  ChildStacksBucketName:
+    Type: String
+    Description: 'Name of the S3 bucket containing the child templates'
+  
+  # Parameters for SUS Domain Stack
+
+  pSUSDomainExecutionRoleName:
+    Type: String 
+    Description: Name of the SUS Domain execution role
+  
+  pSUSDomainServiceRoleName: 
+    Type: String
+    Description: Name of the SUS Domain service role
+
+  pSUSAutomationRoleName:
+    Type: String
+    Description: IAM Role used by Lambda execution role for custom resources
+
+  pSUSDomainName: 
+    Type: String
+    Description: Name of the SUS Domain
+  
+  pSUSDomainAutomationRolePolicyName: 
+    Type: String
+    Description: Name of Automation role policy
+
+  # Parameters for Blueprint Stack
+
+  pSUSDomainManagedAccessRoleName:
+    Type: String
+    Description: Name of the Managed Access Role used by Blueprint Stack
+  
+  pSUSBluprintEnabledRegions:
+    Type: List<String>
+    Description: The List of AWS Regions to enable for SUS Blueprints
+
+  pSUSToolingAddRegion:
+    Type: String
+    Description: Add Regional Parameters (Region) to tooling blueprint
+
+  pSUSToolingBPSubnets:
+    Type: String
+    Description: Comma Delimited Subnet Ids to associate with the SUS Blueprint
+  
+  pSUSToolingBPVpcId:
+    Type: String
+    Description: The VPC Id to associate with the SUS Blueprint
+  
+  pSUSBPToolingBucketName:
+    Type: String
+    Description: The S3 Bucket name to store SUS Tooling Blueprint Code
+  
+  pSSOUserID:
+    Type: String
+    Description: SSO User ID to be added as Project Owner
+
+  pSSOGroupID:
+    Type: String
+    Description: SSO Group ID to be added as Domain Unit Owner
+
+Resources:
+  DomainStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${ChildStacksBucketName}.s3.amazonaws.com/sus-domain-stack.yaml
+      Parameters:
+        pSUSDomainExecutionRoleName: !Ref pSUSDomainExecutionRoleName
+        pSUSDomainServiceRoleName: !Ref pSUSDomainServiceRoleName
+        pSUSAutomationRoleName: !Ref pSUSAutomationRoleName
+        pSUSDomainName: !Ref pSUSDomainName
+        pSUSDomainAutomationRolePolicyName: !Ref pSUSDomainAutomationRolePolicyName
+        pSSOGroupID: !Ref pSSOGroupID
+        pSSOUserID: !Ref pSSOUserID
+
+
+  BlueprintStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${ChildStacksBucketName}.s3.amazonaws.com/sus-blueprints-stack.yaml
+      Parameters:
+        pSUSBPToolingBucketName: !Ref pSUSBPToolingBucketName
+        pSUSDomainManagedAccessRoleName: !Ref pSUSDomainManagedAccessRoleName
+        pSUSDomainid: !GetAtt DomainStack.Outputs.oSUSDomainID
+        pSUSRootDomainUnitID: !GetAtt DomainStack.Outputs.oSUSrootDomainUnitID
+        pSUSDomainExecutionRoleArn: !GetAtt DomainStack.Outputs.oSUSDomainExecutionRoleArn
+        pSUSBluprintEnabledRegions: !Join [",", !Ref pSUSBluprintEnabledRegions]
+        pSUSToolingBPSubnets: !Ref pSUSToolingBPSubnets
+        pSUSToolingBPVpcId: !Ref pSUSToolingBPVpcId
+        pSUSToolingAddRegion: !Ref pSUSToolingAddRegion
+
+  ProjectStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${ChildStacksBucketName}.s3.amazonaws.com/sus-project-stack.yaml
+      Parameters:
+        pSUSDomainid: !GetAtt DomainStack.Outputs.oSUSDomainID
+        pToolingProjectProfileId: !GetAtt BlueprintStack.Outputs.oToolingProjectProfileId
+        pName: "Admin-SUS-Project"
+        pSUSAutomationRoleArn: !GetAtt DomainStack.Outputs.oSUSAutomationRoleArn
+        pSSOUserID: !Ref pSSOUserID
+        pSUSProvisioningRoleArn: !GetAtt BlueprintStack.Outputs.oSUSDomainProvisioningRole
+        pSUSManagedAccessRoleArn: !GetAtt BlueprintStack.Outputs.oSUSDomainManagedAccessRole

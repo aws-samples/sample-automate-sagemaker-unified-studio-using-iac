@@ -1,0 +1,458 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Central Account Stack - creates SageMaker Unified Studio Blueprints, Blueprint Automation role"
+
+Parameters:
+  pSUSDomainManagedAccessRoleName:
+    Type: String
+    Description: "Name of the SUS Domain managed access role"
+
+  pSUSDomainid:
+    Type: String
+    Description: "SUS Domain ID"
+
+  pSUSRootDomainUnitID:
+    Type: String
+    Description: "SUS Domain Root Unit ID"
+  
+  pSUSDomainExecutionRoleArn:
+    Type: String
+    Description: "ARN of the SUS Domain Execution role"
+  
+  pSUSBluprintEnabledRegions:
+    Type: CommaDelimitedList
+    Description: The List of AWS Regions to enable for SUS Blueprints
+
+  pSUSToolingBPSubnets:
+    Type: String
+    Description: Comma Delimited Subnet Ids to associate with the SUS Blueprint
+  
+  pSUSToolingBPVpcId:
+    Type: String
+    Description: The VPC Id to associate with the SUS Blueprint
+  
+  pSUSToolingAddRegion:
+    Type: String
+    Description: Add Regional Parameters (Region) to tooling blueprint
+  
+  pSUSBPToolingBucketName:
+    Type: String
+    Description: The name of the SUS Tooling Blueprint Bucket
+
+  
+Resources:
+  rSUSDomainProvisioningRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Additional permissions for SUS Domain provisioning
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AdditionalProvisioningPermission
+            Effect: Allow
+            Action:
+              - sagemaker:ListTags
+            Resource:
+              - !Sub 'arn:aws:datazone:${AWS::Region}:${AWS::AccountId}:domain/*'
+
+  rSUSDomainProvisioningRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: "In SageMaker, there are many roles created and used for different purpose, hence explicit naming is important"
+    Properties: 
+      Description: Role used by SUS Domain to provision resources
+      RoleName: !Sub AmazonSageMakerProvisioningRole-${AWS::AccountId}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref "AWS::AccountId"
+
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/SageMakerStudioProjectProvisioningRolePolicy
+        - !Ref rSUSDomainProvisioningRolePolicy
+  rSUSDomainManagedAccessRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: "In SageMaker, there are many roles created and used for different purpose, hence explicit naming is important"
+    Properties: 
+      Description: Grants Amazon SageMaker Unified Studio permissions to publish, grant access, and revoke access to Amazon SageMaker Lakehouse, AWS Glue Data Catalog and Amazon Redshift data.
+      RoleName: !Ref pSUSDomainManagedAccessRoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: datazone.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref "AWS::AccountId"
+              ArnEquals:
+                aws:SourceArn: !Sub "arn:aws:datazone:${AWS::Region}:${AWS::AccountId}:domain/${pSUSDomainid}"
+
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonDataZoneGlueManageAccessRolePolicy
+        - arn:aws:iam::aws:policy/service-role/AmazonDataZoneRedshiftManageAccessRolePolicy
+        - arn:aws:iam::aws:policy/AmazonDataZoneSageMakerManageAccessRolePolicy
+
+  rSUSBPToolingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "This bucket is used exclusively for service-to-service communication between SageMaker and DataZone. Access logging can be enabled via parameters if audit requirements demand it. See README Security Recommendations section."
+    Properties:
+      BucketName: !Ref pSUSBPToolingBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !GetAtt rSUSBPToolingKMSKey.Arn
+  
+  rSUSBPToolingBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref rSUSBPToolingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'SecureTransport'
+            Effect: 'Deny'
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub '${rSUSBPToolingBucket.Arn}/*'
+              - !GetAtt rSUSBPToolingBucket.Arn
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+  
+
+  rSUSBPToolingKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for SUS Tooling Blueprint Encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: SUS-TOOLING-BP
+        Statement:
+          - Sid: 'Enable IAM User Permissions'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: "AllowKmsPermissionsForCloudWatch"
+            Effect: "Allow"
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action:
+              - "kms:Encrypt*"
+              - "kms:Decrypt*"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:Describe*"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:datazone-*"
+          - Sid: "RedshiftCreateGrantKmsPermissions"
+            Effect: "Allow"
+            Principal:
+              AWS: !GetAtt rSUSDomainProvisioningRole.Arn
+            Action: "kms:CreateGrant"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Sub ${AWS::AccountId}
+              StringLike:
+                kms:ViaService:
+                  - "redshift-serverless.*.amazonaws.com"
+          - Sid: "AthenaKmsPermissions"
+            Effect: "Allow"
+            Principal:
+              AWS: !GetAtt rSUSDomainProvisioningRole.Arn
+            Action: "kms:GenerateDataKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:CalledViaLast: "athena.amazonaws.com"
+                aws:ResourceAccount: !Sub ${AWS::AccountId}
+          - Sid: "EmrServerlessKmsPermissions"
+            Effect: "Allow"
+            Principal:
+              Service: "emr-serverless.amazonaws.com"
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:emr-serverless:${AWS::Region}:${AWS::AccountId}:/applications/*"
+          - Sid: "EmrServerlessKmsPermissionsForProvisioning"
+            Effect: "Allow"
+            Principal:
+              AWS: !GetAtt rSUSDomainProvisioningRole.Arn
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+            Resource: "*"
+          - Sid: "AllowKmsKeyUsageForSageMakerDomain"
+            Effect: "Allow"
+            Principal:
+              Service: "datazone.amazonaws.com"
+              AWS: !Ref pSUSDomainExecutionRoleArn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: "*"
+          - Sid: "AllowSageMakerDomainKmsGrantPermissions"
+            Effect: "Allow"
+            Principal:
+              Service: "datazone.amazonaws.com"
+              AWS: !Ref pSUSDomainExecutionRoleArn
+            Action:
+              - "kms:ListGrants"
+              - "kms:RevokeGrant"
+            Resource: "*"
+      EnableKeyRotation: true
+  
+  rSUSBPToolingKMSKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub alias/${AWS::StackName}-SUSBPToolingKey
+      TargetKeyId: !Ref rSUSBPToolingKMSKey
+
+  rEnableToolingBlueprint:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EnvironmentBlueprintIdentifier: "Tooling"
+      ManageAccessRoleArn: !GetAtt rSUSDomainManagedAccessRole.Arn
+      ProvisioningRoleArn: !GetAtt rSUSDomainProvisioningRole.Arn
+      RegionalParameters: [
+        {
+          Region: !Ref pSUSToolingAddRegion,
+          Parameters: { 
+            "KmsKeyArn": !GetAtt rSUSBPToolingKMSKey.Arn,
+            "Subnets": !Ref pSUSToolingBPSubnets,
+            "VpcId": !Ref pSUSToolingBPVpcId,
+            "S3Location": !Sub "s3://${rSUSBPToolingBucket}"
+          }
+        }
+      ]
+      EnabledRegions: !Ref pSUSBluprintEnabledRegions
+
+  rEnableLakehouseCatalogBlueprint:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EnvironmentBlueprintIdentifier: "LakehouseCatalog"
+      ManageAccessRoleArn: !GetAtt rSUSDomainManagedAccessRole.Arn
+      ProvisioningRoleArn: !GetAtt rSUSDomainProvisioningRole.Arn
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: { }
+        }
+      ]
+      EnabledRegions: !Ref pSUSBluprintEnabledRegions
+  
+  rEnableLakehouseDatabaseBlueprint:
+    Type: AWS::DataZone::EnvironmentBlueprintConfiguration
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EnvironmentBlueprintIdentifier: "DataLake"
+      ManageAccessRoleArn: !GetAtt rSUSDomainManagedAccessRole.Arn
+      ProvisioningRoleArn: !GetAtt rSUSDomainProvisioningRole.Arn
+      RegionalParameters: [
+        {
+          Region: !Ref 'AWS::Region',
+          Parameters: { }
+        }
+      ]
+      EnabledRegions: !Ref pSUSBluprintEnabledRegions
+
+  rRootDUAuthorizationForLakehouseCatalogBlueprint:
+    Type: AWS::DataZone::PolicyGrant
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EntityType: ENVIRONMENT_BLUEPRINT_CONFIGURATION
+      EntityIdentifier: !Sub "${AWS::AccountId}:${rEnableLakehouseCatalogBlueprint.EnvironmentBlueprintId}"
+      PolicyType: CREATE_ENVIRONMENT_FROM_BLUEPRINT
+      Detail:
+        CreateEnvironmentFromBlueprint: {}
+      Principal:
+        Project:
+           ProjectDesignation: CONTRIBUTOR
+           ProjectGrantFilter:
+              DomainUnitFilter:
+                DomainUnit: !Ref pSUSRootDomainUnitID
+                IncludeChildDomainUnits: true
+  
+  rRootDUAuthorizationForLakehouseDatabaseBlueprint:
+    Type: AWS::DataZone::PolicyGrant
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EntityType: ENVIRONMENT_BLUEPRINT_CONFIGURATION
+      EntityIdentifier: !Sub "${AWS::AccountId}:${rEnableLakehouseDatabaseBlueprint.EnvironmentBlueprintId}"
+      PolicyType: CREATE_ENVIRONMENT_FROM_BLUEPRINT
+      Detail:
+        CreateEnvironmentFromBlueprint: {}
+      Principal:
+        Project:
+           ProjectDesignation: CONTRIBUTOR
+           ProjectGrantFilter:
+              DomainUnitFilter:
+                DomainUnit: !Ref pSUSRootDomainUnitID
+                IncludeChildDomainUnits: true
+  
+  rRootDUAuthorizationForToolingBlueprint:
+    Type: AWS::DataZone::PolicyGrant
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      EntityType: ENVIRONMENT_BLUEPRINT_CONFIGURATION
+      EntityIdentifier: !Sub "${AWS::AccountId}:${rEnableToolingBlueprint.EnvironmentBlueprintId}"
+      PolicyType: CREATE_ENVIRONMENT_FROM_BLUEPRINT
+      Detail:
+        CreateEnvironmentFromBlueprint: {}
+      Principal:
+        Project:
+           ProjectDesignation: CONTRIBUTOR
+           ProjectGrantFilter:
+              DomainUnitFilter:
+                DomainUnit: !Ref pSUSRootDomainUnitID
+                IncludeChildDomainUnits: true
+
+  rSUSProjectProfileTooling:
+    Type: AWS::DataZone::ProjectProfile
+    Properties:
+      Description: Project Profile for Tooling Blueprint
+      DomainIdentifier: !Ref pSUSDomainid
+      Name: "Tooling"
+      Status: "ENABLED"
+      EnvironmentConfigurations:
+        - Name: "SUSTooling"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 0
+          EnvironmentBlueprintId: !GetAtt rEnableToolingBlueprint.EnvironmentBlueprintId
+          
+  
+  rSUSProjectProfileLakeHouseDBAndTooling:
+    Type: AWS::DataZone::ProjectProfile
+    Properties:
+      Description: Project Profile for LakeHouse Database and Tooling Blueprints
+      DomainIdentifier: !Ref pSUSDomainid
+      Name: "LakeHouse Database and Tooling"
+      Status: "ENABLED"
+      EnvironmentConfigurations:
+        - Name: "LakeHouse Database"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 1
+          EnvironmentBlueprintId: !GetAtt rEnableLakehouseDatabaseBlueprint.EnvironmentBlueprintId
+        - Name: "Tooling"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 0
+          EnvironmentBlueprintId: !GetAtt rEnableToolingBlueprint.EnvironmentBlueprintId
+          
+
+  rSUSProjectProfileLakeHouseCataLogAndDBAndTooling:
+    Type: AWS::DataZone::ProjectProfile
+    Properties:
+      Description: Project Profile for LakeHouse Catalog, LakeHouse Database and Tooling Blueprints
+      DomainIdentifier: !Ref pSUSDomainid
+      Name: "LakeHouse Catalog and LakeHouse Database and Tooling"
+      Status: "ENABLED"
+      EnvironmentConfigurations:
+        - Name: "LakeHouse Catalog"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 1
+          EnvironmentBlueprintId: !GetAtt rEnableLakehouseCatalogBlueprint.EnvironmentBlueprintId
+          
+        - Name: "LakeHouse Database"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 1
+          EnvironmentBlueprintId: !GetAtt rEnableLakehouseDatabaseBlueprint.EnvironmentBlueprintId
+          
+        - Name: "Tooling"
+          AwsAccount:
+            AwsAccountId: !Ref AWS::AccountId
+          AwsRegion:
+            RegionName: !Ref AWS::Region
+          DeploymentMode: ON_CREATE
+          DeploymentOrder: 0
+          EnvironmentBlueprintId: !GetAtt rEnableToolingBlueprint.EnvironmentBlueprintId
+  
+  rAddPolicyGrantForProfiles:
+       Type: AWS::DataZone::PolicyGrant
+       Properties:
+           DomainIdentifier: !Ref pSUSDomainid
+           EntityType: DOMAIN_UNIT
+           EntityIdentifier: !Ref pSUSRootDomainUnitID
+           PolicyType: CREATE_PROJECT_FROM_PROJECT_PROFILE
+           Detail:
+               CreateProjectFromProjectProfile:
+                   IncludeChildDomainUnits: true
+                   ProjectProfiles:
+                       - !GetAtt rSUSProjectProfileTooling.Id
+                       - !GetAtt rSUSProjectProfileLakeHouseDBAndTooling.Id
+                       - !GetAtt rSUSProjectProfileLakeHouseCataLogAndDBAndTooling.Id
+           Principal:
+               User:
+                   AllUsersGrantFilter: {}
+Outputs:
+  oToolingProjectProfileId:
+    Description: Tooling Project Profile ID
+    Value: !GetAtt rSUSProjectProfileTooling.Id
+  
+  oSUSDomainProvisioningRole:
+    Description: SUS Domain Provisioning Role ARN
+    Value: !GetAtt rSUSDomainProvisioningRole.Arn
+
+  oSUSDomainManagedAccessRole:
+    Description: SUS Domain Managed Access Role ARN
+    Value: !GetAtt rSUSDomainManagedAccessRole.Arn

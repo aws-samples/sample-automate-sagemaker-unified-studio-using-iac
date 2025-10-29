@@ -1,0 +1,59 @@
+[   
+    {
+        "ParameterKey": "ChildStacksBucketName",
+        "ParameterValue": "my-sus-apg-stacks-us-east-1-<account-id>"
+    },
+    {
+        "ParameterKey": "pSUSToolingBPVpcId",
+        "ParameterValue": "<vpc-id>"
+    },
+    {
+        "ParameterKey": "pSUSToolingBPSubnets",
+        "ParameterValue": "<private-subnet-1>, <private-subnet-2>"
+    },
+    {
+        "ParameterKey": "pSUSAutomationRoleName",
+        "ParameterValue": "APG-sus_automation_role"
+    },
+    {
+        "ParameterKey": "pSUSDomainAutomationRolePolicyName",
+        "ParameterValue": "APG-SUSDomainAutomationPolicy"
+    },
+    {
+        "ParameterKey": "pSUSDomainExecutionRoleName",
+        "ParameterValue": "APG-AmazonSUSDomainExecutionRole"
+    },
+    {
+        "ParameterKey": "pSUSDomainServiceRoleName",
+        "ParameterValue": "APG-AmazonSUSDomainServiceRole"
+    },
+    {
+        "ParameterKey": "pSUSDomainName",
+        "ParameterValue": "APG-SUS-Enterprise"
+    },
+    {
+        "ParameterKey": "pSUSDomainManagedAccessRoleName",
+        "ParameterValue": "APG-AmazonSageMakerManageAccessRole"
+    },
+    {
+        "ParameterKey": "pSUSBluprintEnabledRegions",
+        "ParameterValue": "us-east-1"
+    },
+    {
+        "ParameterKey": "pSUSToolingAddRegion",
+        "ParameterValue": "us-east-1"
+    },
+    {
+        "ParameterKey": "pSUSBPToolingBucketName",
+        "ParameterValue": "sus-apg-tooling-us-east-1-<account-id>"
+    },
+    {
+        "ParameterKey": "pSSOUserID",
+        "ParameterValue": "<SSO User ID>"
+    },
+    {
+        "ParameterKey": "pSSOGroupID",
+        "ParameterValue": "<SSO Group ID>"
+    }
+    
+]

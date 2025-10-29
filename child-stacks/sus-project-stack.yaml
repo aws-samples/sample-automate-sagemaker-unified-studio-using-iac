@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Central Account Stack - creates SageMaker Unified Studio Project"
+
+Parameters:
+  pSUSDomainid:
+    Description: Domain for which blueprint needs to be enabled
+    Type: String
+  pToolingProjectProfileId:
+    Description: Tooling Project Profile id for which we need to create project
+    Type: String
+  pName:
+    Description: Name of the project
+    Type: String
+  pSUSAutomationRoleArn:
+    Description: SUS Automation Role ARN
+    Type: String
+  pSSOUserID:
+    Description: SSO User ID to be added as Project Owner
+    Type: String
+  
+  pSUSProvisioningRoleArn:
+    Type: String
+    Description: The ARN of the SUS Provisioning Role ARN
+  
+  pSUSManagedAccessRoleArn:
+    Type: String
+    Description: The ARN of the SUS Managed Access Role ARN
+  
+
+
+Resources:
+  rAddDataLakeAdministratorToLakeFormation:
+    Type: AWS::LakeFormation::DataLakeSettings
+    Properties:
+      Admins:
+        - DataLakePrincipalIdentifier: !Ref pSUSManagedAccessRoleArn
+        - DataLakePrincipalIdentifier: !Ref pSUSProvisioningRoleArn
+  rProject:
+    Type: AWS::DataZone::Project
+    DependsOn: rAddDataLakeAdministratorToLakeFormation
+    Properties:
+      Description: "Admin SUS Project"
+      DomainIdentifier: !Ref pSUSDomainid
+      Name: !Ref pName
+      ProjectProfileId: !Ref pToolingProjectProfileId
+
+  rAddSSOUserToProjectMembership:
+    Type: AWS::DataZone::ProjectMembership
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      ProjectIdentifier: !GetAtt rProject.Id
+      Member:
+        UserIdentifier: !Ref pSSOUserID
+      Designation: "PROJECT_OWNER"
+  
+  rAddSUSAutomationRoleToProjectMembership:
+    Type: AWS::DataZone::ProjectMembership
+    Properties:
+      DomainIdentifier: !Ref pSUSDomainid
+      ProjectIdentifier: !GetAtt rProject.Id
+      Member:
+        UserIdentifier: !Ref pSUSAutomationRoleArn
+      Designation: "PROJECT_OWNER"
