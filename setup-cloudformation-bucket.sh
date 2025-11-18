@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-REGION=us-east-1
+REGION=${1:-us-east-1}  # Use first argument or default to us-east-1
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 
 
@@ -8,7 +8,12 @@ BUCKET_NAME="my-sus-apg-stacks-${REGION}-${ACCOUNT_ID}"  # unique bucket name
 
 CHILD_STACKS_DIR="./child-stacks"     # directory with child stacks
 echo "Creating S3 bucket: $BUCKET_NAME in region $REGION"
-aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}"
+# Special handling for us-east-1 (no location constraint needed)
+if [ "$REGION" = "us-east-1" ]; then
+    aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}"
+else
+    aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}" --create-bucket-configuration LocationConstraint="${REGION}"
+fi
 
 aws s3api put-bucket-versioning --bucket "${BUCKET_NAME}" --versioning-configuration Status=Enabled
 sleep 3
