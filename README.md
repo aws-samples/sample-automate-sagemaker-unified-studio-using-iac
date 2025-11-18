@@ -79,11 +79,19 @@ Edit the `params.json` file with your environment-specific values.
 
 ### Step 2: Setup CloudFormation Bucket
 
-Run the setup script to create the S3 bucket and upload child templates:
+Run the setup script to create the S3 bucket and upload child templates. The script accepts an optional region parameter.
+#### Usage
 
+**With default region (us-east-1):**
 ```bash
-./setup-cloudformation-bucket.sh
+./setup-cloudformation-bucket.sh 
 ```
+
+**With specified region:**
+```bash
+./setup-cloudformation-bucket.sh <region>
+```
+
 
 This script will:
 - Create a versioned S3 bucket for CloudFormation templates
